@@ -5,6 +5,7 @@
 // This is a simple demonstration on calculating merkle root from merkle branch
 // and solving a block (#286819) which the information is downloaded from Block Explorer
 //***********************************************************************************
+#define DEBUG
 
 #include <cassert>
 #include <cstdio>
@@ -15,6 +16,19 @@
 
 #include "sha256.h"
 
+#ifdef DEBUG
+#include <chrono>
+#define __debug_printf(fmt, args...) printf(fmt, ##args);
+#define __START_TIME(ID) auto start_##ID = std::chrono::high_resolution_clock::now();
+#define __END_TIME(ID)                                                                                        \
+    auto stop_##ID = std::chrono::high_resolution_clock::now();                                               \
+    int duration_##ID = std::chrono::duration_cast<std::chrono::nanoseconds>(stop_##ID - start_##ID).count(); \
+    __debug_printf("duration of %s: %d nanoseconds\n", #ID, duration_##ID);
+#else
+#define __debug_printf(fmt, args...)
+#define __START_TIME(ID)
+#define __END_TIME(ID)
+#endif
 ////////////////////////   Block   /////////////////////
 
 typedef struct _block {
@@ -44,6 +58,7 @@ unsigned char decode(unsigned char c) {
         case 'f':
             return 0x0f;
         case '0' ... '9':
+        default:
             return c - '0';
     }
 }
@@ -60,7 +75,7 @@ void convert_string_to_little_endian_bytes(unsigned char *out, char *in, size_t 
     size_t s = 0;
     size_t b = string_len / 2 - 1;
 
-    for (s, b; s < string_len; s += 2, --b) {
+    for (/* s, b */; s < string_len; s += 2, --b) {
         out[b] = (unsigned char)(decode(in[s]) << 4) + decode(in[s + 1]);
     }
 }
@@ -296,3 +311,9 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+/*
+make; srun -p ipc22 -N1 -n1 -c1 -t1 --gres=gpu:1 ./hw4 testcases/case00.in outputs/case00.out; ./validation outputs/case00.out testcases/case00.out
+make; srun -p ipc22 -N1 -n1 -c1 -t1 --gres=gpu:1 ./hw4 testcases/case01.in outputs/case01.out; ./validation outputs/case01.out testcases/case01.out
+make; srun -p ipc22 -N1 -n1 -c1 -t1 --gres=gpu:1 ./hw4 testcases/case02.in outputs/case02.out; ./validation outputs/case02.out testcases/case02.out
+make; srun -p ipc22 -N1 -n1 -c1 -t1 --gres=gpu:1 ./hw4 testcases/case03.in outputs/case03.out; ./validation outputs/case03.out testcases/case03.out
+ */
