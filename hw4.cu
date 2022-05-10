@@ -453,9 +453,8 @@ void calc_merkle_root(unsigned char *root, int count, char **branch) {
 //////////////////////   SHA256   ////////////////////////
 
 __global__ void get_nonce(unsigned char target_hex[], const unsigned int version, const unsigned char prevhash[], const unsigned char merkle_root[], const unsigned int ntime, const unsigned int nbits, unsigned int *nonce, int *found_cnt) {
-    if (*found_cnt != 0) {
+    if (*found_cnt != 0)
         return;
-    }
 
     int index = blockIdx.x * threadsPerBlock + threadIdx.x;
     const unsigned int thride = totalThreads;
@@ -488,34 +487,45 @@ __global__ void get_nonce(unsigned char target_hex[], const unsigned int version
 
     block.nonce = index;
 
-    // block.version = local_version;
-    // memcpy(block.prevhash, local_prevhash, 32);
-    // memcpy(block.merkle_root, local_merkle_root, 32);
-    // block.ntime = local_ntime;
-    // block.nbits = local_nbits;
+    // #pragma unroll
+    //     for (int8_t i = 0; i < 32; i++)
+    //         block.prevhash[i] = local_prevhash[i];
+    // #pragma unroll
+    //     for (int8_t i = 0; i < 32; i++)
+    //         block.merkle_root[i] = local_merkle_root[i];
     block.version = version;
-    memcpy(block.prevhash, prevhash, 32);
-    memcpy(block.merkle_root, merkle_root, 32);
+    // memcpy(block.prevhash, prevhash, 32);
+    // memcpy(block.merkle_root, merkle_root, 32);
+#pragma unroll
+    for (int8_t i = 0; i < 32; i++)
+        block.prevhash[i] = prevhash[i];
+#pragma unroll
+    for (int8_t i = 0; i < 32; i++)
+        block.merkle_root[i] = merkle_root[i];
     block.ntime = ntime;
     block.nbits = nbits;
 
-    while (*found_cnt == 0) {
+    while (true) {
         // sha256d
         double_sha256_gpu(&sha256_ctx, (unsigned char *)&block);
-        // if (block.nonce % 100000000 == 0) {
-        //     __debug_printf("index %5u ", index);
-        //     __debug_printf("hash #%10u (big): ", block.nonce);
-        //     print_sha256_inverse_gpu(sha256_ctx.b);
-        //     __debug_printf("\n");
-        // }
+#ifdef DEBUG
+        if (block.nonce % 100000000 == 0) {
+            __debug_printf("index %5u ", index);
+            __debug_printf("hash #%10u (big): ", block.nonce);
+            print_sha256_inverse_gpu(sha256_ctx.b);
+            __debug_printf("\n");
+        }
+#endif
 
         if (little_endian_bit_comparison_gpu(sha256_ctx.b, /* local_ */ target_hex) < 0)  // sha256_ctx < target_hex
         {
-            // __debug_printf("Found Solution!!\n");
-            // __debug_printf("index %5u ", index);
-            // __debug_printf("hash #%10u (big): ", block.nonce);
-            // print_sha256_inverse_gpu(sha256_ctx.b);
-            // __debug_printf("\n\n");
+#ifdef DEBUG
+            __debug_printf("Found Solution!!\n");
+            __debug_printf("index %5u ", index);
+            __debug_printf("hash #%10u (big): ", block.nonce);
+            print_sha256_inverse_gpu(sha256_ctx.b);
+            __debug_printf("\n\n");
+#endif
             if (0 == atomicAdd(found_cnt, 1))
                 *nonce = block.nonce;
         }
@@ -525,8 +535,6 @@ __global__ void get_nonce(unsigned char target_hex[], const unsigned int version
             break;
         else
             block.nonce += thride;
-
-        // __syncthreads();
     }
 }
 
@@ -617,9 +625,8 @@ void solve(FILE *fin, FILE *fout) {
     unsigned char *device_prevhash;
     unsigned char *device_merkle_root;
     unsigned char *device_target_hex;
-    unsigned int *nonce;
     unsigned int *device_nonce;
-    cudaErrorPrint(cudaMalloc /* Managed */ (&found_cnt, 4), 0);
+    cudaErrorPrint(cudaMalloc(&found_cnt, 4), 0);
     cudaErrorPrint(cudaMalloc(&device_prevhash, 32), 1);     // Cuda malloc gpu previous hash
     cudaErrorPrint(cudaMalloc(&device_merkle_root, 32), 2);  // Cuda malloc gpu merkle root
     cudaErrorPrint(cudaMalloc(&device_target_hex, 32), 3);   // Cuda malloc gpu target hex
@@ -632,14 +639,7 @@ void solve(FILE *fin, FILE *fout) {
     dim3 myBlockDim(threadsPerBlock);
     dim3 myGridDim(blocksPerGrid);
     get_nonce<<<myGridDim, myBlockDim>>>(device_target_hex, block.version, device_prevhash, device_merkle_root, block.ntime, block.nbits, device_nonce, found_cnt);
-
-    nonce = new unsigned int;
-    cudaErrorPrint(cudaMemcpyAsync(nonce, device_nonce, 4, cudaMemcpyDeviceToHost), 8);  // Cuda asyncronize copy nonce array
-
-    cudaErrorPrint(cudaGetLastError(), 9);        // Cuda debug
-    cudaErrorPrint(cudaDeviceSynchronize(), 10);  // Cuda synchronize
-
-    block.nonce = *nonce;
+    cudaErrorPrint(cudaMemcpyAsync(&block.nonce, device_nonce, 4, cudaMemcpyDeviceToHost), 8);  // Cuda asyncronize copy nonce
 
     // print result
 
@@ -653,6 +653,8 @@ void solve(FILE *fin, FILE *fout) {
     print_hex_inverse(sha256_ctx.b, 32);
     __debug_printf("\n\n");
 
+    cudaErrorPrint(cudaGetLastError(), 9);        // Cuda debug
+    cudaErrorPrint(cudaDeviceSynchronize(), 10);  // Cuda synchronize
     for (int i = 0; i < 4; ++i) {
         fprintf(fout, "%02x", ((unsigned char *)&block.nonce)[i]);
     }
@@ -660,7 +662,6 @@ void solve(FILE *fin, FILE *fout) {
 
     delete[] merkle_branch;
     delete[] raw_merkle_branch;
-    delete[] nonce;
     cudaFree(found_cnt);
     cudaFree(device_prevhash);
     cudaFree(device_merkle_root);
